@@ -1,0 +1,4 @@
+name = "taiwan-disaster-map"
+# This is used by `wrangler pages dev` and can be read by CF tooling.
+pages_build_output_dir = "dist"
+
