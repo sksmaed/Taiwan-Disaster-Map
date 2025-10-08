@@ -1,10 +1,18 @@
 
 
-import React, { useState, useMemo, useCallback, useContext } from 'react';
+import React, { useState, useMemo, useCallback, useContext, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { Disaster, DisasterType, Comment, StoryPreview } from './types';
 import { DISASTERS, DISASTER_TYPE_DETAILS, COMMENTS_DATA } from './data/disasters';
+import {
+  loadComments,
+  saveComments,
+  loadUserDisasters,
+  saveUserDisasters,
+  loadDisasterStoryAdditions,
+  saveDisasterStoryAdditions,
+} from './services/storage';
 import DisasterDetailPanel from './components/DisasterDetailPanel';
 import FilterPanel from './components/FilterPanel';
 import Header from './components/Header';
@@ -75,12 +83,21 @@ export default function App() {
   });
   const [selectedDisaster, setSelectedDisaster] = useState<Disaster | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [allComments, setAllComments] = useState<{ [key: number]: Comment[] }>(COMMENTS_DATA);
+  const [allComments, setAllComments] = useState<{ [key: number]: Comment[] }>(() => {
+    const persisted = loadComments();
+    return Object.keys(persisted).length ? persisted : COMMENTS_DATA;
+  });
   const { user } = useContext(AuthContext);
 
   // State for disasters
-  const [disasters, setDisasters] = useState<Disaster[]>(DISASTERS);
-  const [userAddedDisasters, setUserAddedDisasters] = useState<Disaster[]>([]);
+  const [disasters, setDisasters] = useState<Disaster[]>(() => {
+    const additions = loadDisasterStoryAdditions();
+    return DISASTERS.map(d => ({
+      ...d,
+      stories: [...d.stories, ...(additions[d.id] || [])],
+    }));
+  });
+  const [userAddedDisasters, setUserAddedDisasters] = useState<Disaster[]>(() => loadUserDisasters());
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [newDisasterLocation, setNewDisasterLocation] = useState<[number, number] | null>(null);
   const [isLocationPickerActive, setIsLocationPickerActive] = useState(false);
@@ -172,6 +189,20 @@ export default function App() {
         }
         return prev;
     });
+  }, [userAddedDisasters]);
+
+  // Persist comments whenever they change
+  useEffect(() => {
+    try {
+      saveComments(allComments);
+    } catch (_e) {}
+  }, [allComments]);
+
+  // Persist user-added disasters whenever they change
+  useEffect(() => {
+    try {
+      saveUserDisasters(userAddedDisasters);
+    } catch (_e) {}
   }, [userAddedDisasters]);
   
   const handleCloseReportModal = () => {
@@ -269,7 +300,19 @@ export default function App() {
             allComments={allComments}
             setAllComments={setAllComments}
             onLikeComment={handleLikeComment}
-            onAddStory={handleAddStory}
+            onAddStory={(disasterId, newStory) => {
+              // Update in-memory state using existing handler
+              handleAddStory(disasterId, newStory);
+              // Additionally persist if it is a base disaster (not user-added)
+              if (!userAddedDisasters.some(d => d.id === disasterId)) {
+                const current = loadDisasterStoryAdditions();
+                const existing = current[disasterId] || [];
+                const updated = { ...current, [disasterId]: [...existing, newStory] };
+                try {
+                  saveDisasterStoryAdditions(updated);
+                } catch (_e) {}
+              }
+            }}
           />
         </main>
       </div>
